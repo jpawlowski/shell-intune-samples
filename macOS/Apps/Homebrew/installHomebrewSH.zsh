@@ -43,17 +43,17 @@
 # Pick correct URL for the CPU architecture
 if [[ $(uname -m) == 'arm64' ]]; then
     # This is Apple Silicon URL
-    weburl="https://github.com/Homebrew/brew/releases/download/4.1.3/Homebrew-4.1.3.pkg"
+    weburl="https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh" 
     processpath="/opt/homebrew/"         # The process name of the App we are installing
-    else
+else
     # This is x64 URL
-    weburl="https://github.com/Homebrew/brew/releases/download/4.1.3/Homebrew-4.1.3.pkg"
+    weburl="https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh"   
     processpath="/usr/local/homebrew/"   # The process name of the App we are installing
 fi
 
 appname="Homebrew"                                                      # The name of our App deployment script (also used for Octory monitor)
 app="homebrew"                                                          # The actual name of our App once installed
-logandmetadir="/Library/Logs/Microsoft/IntuneScripts/$appname"          # The location of our logs and last updated data
+logandmetadir="/Library/Logs/Microsoft/IntuneScripts/installHomebrew"   # The location of our logs and last updated data
 terminateprocess="false"                                                # Do we want to terminate the running process? If false we'll wait until its not running
 autoUpdate="true"                                                       # Application updates itself, if already installed we should exit
 brewInstall="chezmoi op powershell"                                     # Homebrew Bottles that shall be installed right away
@@ -108,67 +108,6 @@ function installAria2c () {
             hdiutil detach -quiet "$mountpoint"
         fi
         rm -rf "$output"
-    fi
-
-}
-
-function installHomebrewPKG () {
-
-    #################################################################################################################
-    #################################################################################################################
-    ##
-    ##  This function takes the following global variables and installs the PKG file
-    ##
-    ##  Functions
-    ##
-    ##      isAppRunning (Pauses installation if the process defined in global variable $processpath is running )
-    ##      fetchLastModifiedDate (Called with update flag which causes the function to write the new lastmodified date to the metadata file)
-    ##
-    ##  Variables
-    ##
-    ##      $appname = Description of the App we are installing
-    ##      $tempfile = location of temporary DMG file downloaded
-    ##      $volume = name of volume mount point
-    ##      $app = name of Application directory under /Applications
-    ##
-    ###############################################################
-    ###############################################################
-
-
-    # Check if app is running, if it is we need to wait.
-    waitForProcess "$processpath" "300" "$terminateprocess"
-
-    echo "$(date) | Installing $appname"
-
-
-    # Update Octory monitor
-    updateOctory installing
-
-    # Remove existing files if present
-    if [[ -d "/Applications/$app" ]]; then
-        rm -rf "/Applications/$app"
-    fi
-
-    installer -pkg "$tempfile" -target /Applications
-
-    # Checking if the app was installed successfully
-    if [ "$?" = "0" ]; then
-
-        echo "$(date) | $appname Installed"
-        echo "$(date) | Cleaning Up"
-        rm -rf "$tempdir"
-
-        echo "$(date) | Application [$appname] succesfully installed"
-        fetchLastModifiedDate update
-        updateOctory installed
-        exit 0
-
-    else
-
-        echo "$(date) | Failed to install $appname"
-        rm -rf "$tempdir"
-        updateOctory failed
-        exit 1
     fi
 
 }
@@ -388,13 +327,14 @@ function downloadApp () {
                 packageType="BZ2"
                 ;;
 
-            *.tgz|*.TGZ|*.tar.gz|*.TAR.GZ)
-                packageType="TGZ"
-                ;;
-
             *.dmg|*.DMG)
                 
                 packageType="DMG"
+                ;;
+
+            *.sh|*.SH|*.bash|*.BASH|.zsh|.ZSH)
+                
+                packageType="SHELLSCRIPT"
                 ;;
 
             *)
@@ -428,14 +368,13 @@ function downloadApp () {
                 tempfile="$tempdir/install.tar.bz2"
                 fi
 
-                if [[ "$metadata" == *"POSIX tar archive (gzip compressed data"* ]]; then
-                packageType="TGZ"
-                mv "$tempfile" "$tempdir/install.tar.gz"
-                tempfile="$tempdir/install.tar.gz"
+                if [[ "$metadata" == *"shell script text executable"* ]]; then
+                packageType="SHELLSCRIPT"
+                mv "$tempfile" "$tempdir/install.sh"
+                tempfile="$tempdir/install.sh"
                 fi
                 ;;
             esac
-
                 
             if [[ "$packageType" == "DMG" ]]; then
                 # We have what we think is a DMG, but we don't know what is inside it yet, could be an APP or PKG or ZIP
@@ -526,7 +465,7 @@ function updateCheck() {
     echo "$(date) | Checking if we need to install or update [$appname]"
 
     ## Is the app already installed?
-    if [ -d "/Applications/$app" ]; then
+    if [ -d "${processpath}bin/brew" ]; then
 
     # App is installed, if it's updates are handled by MAU we should quietly exit
     if [[ $autoUpdate == "true" ]]; then
@@ -1017,6 +956,102 @@ function installBZ2 () {
     fi
 }
 
+## Run SHELLSCRIPT Function
+function runSHELLSCRIPT () {
+
+    # Check if app is running, if it is we need to wait.
+    waitForProcess "$processpath" "300" "$terminateprocess"
+
+    echo "$(date) | Installing $appname"
+    updateOctory installing
+
+    # Change into temp dir
+    cd "$tempdir"
+    if [ "$?" = "0" ]; then
+      echo "$(date) | Changed current directory to $tempdir"
+    else
+      echo "$(date) | failed to change to $tempfile"
+      if [ -d "$tempdir" ]; then rm -rf $tempdir; fi
+      updateOctory failed
+      exit 1
+    fi
+
+    # If app is already installed, remove all old files
+    if [[ -a "$processpath" ]]; then
+    
+      echo "$(date) | Removing old installation at $processpath"
+      rm -rf "$processpath"
+    fi
+
+    # Make sure permissions are correct
+    echo "$(date) | Fix up permissions and copy $tempfile to /tmp/$tempfile"
+    cp -f $tempfile /tmp/$tempfile
+    chmod 755 /tmp/$tempfile
+
+    for user in $(/usr/bin/users)
+    do
+        [ "$?" != "0" ] && break
+        groups jp | grep -q -w admin
+        if [ "$?" = "0" ]; then
+            echo "$(date) | Adding temporal passwordless sudo permissions for user $user"
+            echo "$user ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/temp_install-$app
+
+            echo "$(date) | Running install script /tmp/$tempfile in user context for user $user"
+            su -l $user -c "NONINTERACTIVE=1 /bin/bash /tmp/$tempfile"
+        else
+            echo "$(date) | $user does not have local admin permissions, installation denied."
+            return 1
+        fi
+
+        break
+    done
+
+    # Checking if the app was installed successfully
+    if [ "$?" = "0" ]; then
+        if [[ -a "${processpath}bin/brew" ]]; then
+            echo "$(date) | $appname Installed"
+
+            grep -q ${processpath}bin/brew /Users/$user/.zprofile || (echo; echo 'eval "$('${processpath}'bin/brew shellenv)"') >> /Users/$user/.zprofile
+            chown $user /Users/$user/.zprofile
+            echo "#!/usr/bin/env zsh" > "/tmp/brew_install.zsh"
+            echo "eval \"\$(${processpath}bin/brew shellenv)\"" >> "/tmp/brew_install.zsh"
+            echo "echo \"\$(date) | Install basic Brew bottles\"" >> "/tmp/brew_install.zsh"
+            echo "brew install $brewInstall" >> "/tmp/brew_install.zsh"
+            echo "brew cleanup --prune=all" >> "/tmp/brew_install.zsh"
+            chmod 777 "/tmp/brew_install.zsh"
+            su -l $user -c "/tmp/brew_install.zsh"
+
+            echo "$(date) | $appname Bottles Installed"
+            updateOctory installed
+            echo "$(date) | Cleaning Up"
+            rm -rf "$tempfile" "/tmp/$tempfile" "/tmp/brew_install.zsh" "/etc/sudoers.d/temp_install-$app"
+
+            # Update metadata
+            fetchLastModifiedDate update
+
+            echo "$(date) | Application [$appname] succesfully installed"
+            exit 0
+        else
+            echo "$(date) | Cleaning Up"
+            rm -rf "$tempfile" "/tmp/$tempfile" "/tmp/brew_install.zsh" "/etc/sudoers.d/temp_install-$app"
+
+            echo "$(date) | Failed to install $appname"
+            exit 1
+        fi
+    else
+        echo "$(date) | Cleaning Up"
+        rm -rf "$tempfile" "/tmp/$tempfile" "/tmp/brew_install.zsh" "/etc/sudoers.d/temp_install-$app"
+
+        # Something went wrong here, either the download failed or the install Failed
+        # intune will pick up the exit status and the IT Pro can use that to determine what went wrong.
+        # Intune can also return the log file if requested by the admin
+        
+        echo "$(date) | Failed to install $appname"
+        if [ -d "$tempdir" ]; then rm -rf $tempdir; fi
+        exit 1
+    fi
+}
+
 function updateOctory () {
 
     #################################################################################################################
@@ -1042,6 +1077,39 @@ function updateOctory () {
             echo "$(date) | Updating Octory monitor for [$appname] to [$1]"
             /usr/local/bin/octo-notifier monitor "$appname" --state $1 >/dev/null
         fi
+    fi
+
+}
+
+function updateSplashScreen () {
+
+    #################################################################################################################
+    #################################################################################################################
+    ##
+    ##  This function is designed to update the Splash Screen status (if required)
+    ##
+    ##
+    ##  Parameters (updateSplashScreen parameter)
+    ##
+    ##      wait
+    ##      success
+    ##      fail
+    ##      error
+    ##      pending
+    ##      progress:xx
+    ##
+    ###############################################################
+    ###############################################################
+
+    # Is Swift Dialog present
+    if [[ -a "/Library/Application Support/Dialog/Dialog.app/Contents/MacOS/Dialog" ]]; then
+
+
+        echo "$(date) | Updating Swift Dialog monitor for [$appname] to [$1]"
+        echo listitem: title: $appname, status: $1, statustext: $2 >> /var/tmp/dialog.log 
+
+        # Supported status: wait, success, fail, error, pending or progress:xx
+
     fi
 
 }
@@ -1108,33 +1176,7 @@ waitForDesktop
 # Download app
 downloadApp
 
-# Install PKG file
-if [[ $packageType == "PKG" ]]; then
-    # installPKG
-    installHomebrewPKG
-fi
-
-# Install PKG file
-if [[ $packageType == "ZIP" ]]; then
-    installZIP
-fi
-
-# Install PKG file
-if [[ $packageType == "BZ2" ]]; then
-    installBZ2
-fi
-
-# Install PKG file
-if [[ $packageType == "TGZ" ]]; then
-    installHomebrewTGZ
-fi
-
-# Install PKG file
-if [[ $packageType == "DMG" ]]; then
-    installDMG
-fi
-
-# Install DMGPKG file
-if [[ $packageType == "DMGPKG" ]]; then
-    installDMGPKG
+# Run SHELLSCRIPT file
+if [[ $packageType == "SHELLSCRIPT" ]]; then
+    runSHELLSCRIPT
 fi
