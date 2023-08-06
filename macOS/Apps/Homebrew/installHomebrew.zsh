@@ -54,7 +54,7 @@ if [[ $(uname -m) == 'arm64' ]]; then
 fi
 
 appname="Homebrew"                                                      # The name of our App deployment script (also used for Octory monitor)
-logandmetadir="/Library/Logs/Microsoft/IntuneScripts/$appname"          # The location of our logs and last updated data
+logandmetadir="/Library/Logs/Microsoft/IntuneScripts/install$appname"   # The location of our logs and last updated data
 appdir="/"                                                              # The location directory for the application (usually /Applications)
 processpath="$appdir/$app/Library/"                                     # The process name of the App we are installing
 terminateprocess="false"                                                # Do we want to terminate the running process? If false we'll wait until its not running
