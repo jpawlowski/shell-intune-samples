@@ -44,17 +44,19 @@
 if [[ $(uname -m) == 'arm64' ]]; then
     # This is Apple Silicon URL
     weburl="https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh" 
-    else
+    processpath="/opt/homebrew/"         # The process name of the App we are installing
+else
     # This is x64 URL
     weburl="https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh"   
+    processpath="/usr/local/homebrew/"   # The process name of the App we are installing
 fi
 
-appname="homebrew"                                                      # The name of our App deployment script (also used for Octory monitor)
+appname="Homebrew"                                                      # The name of our App deployment script (also used for Octory monitor)
 app="homebrew"                                                          # The actual name of our App once installed
 logandmetadir="/Library/Logs/Microsoft/IntuneScripts/installHomebrew"   # The location of our logs and last updated data
-processpath="/opt/homebrew/"                                            # The process name of the App we are installing
 terminateprocess="false"                                                # Do we want to terminate the running process? If false we'll wait until its not running
 autoUpdate="true"                                                       # Application updates itself, if already installed we should exit
+brewInstall = "chezmoi op powershell"                                   # Homebrew Bottles that shall be installed right away
 
 # Generated variables
 tempdir=$(mktemp -d)
@@ -463,7 +465,7 @@ function updateCheck() {
     echo "$(date) | Checking if we need to install or update [$appname]"
 
     ## Is the app already installed?
-    if [ -d "/opt/$app" ]; then
+    if [ -d "${processpath}bin/brew" ]; then
 
     # App is installed, if it's updates are handled by MAU we should quietly exit
     if [[ $autoUpdate == "true" ]]; then
@@ -975,11 +977,10 @@ function installHomebrew () {
     fi
 
     # If app is already installed, remove all old files
-    if [[ -a "/opt/$app" ]]; then
+    if [[ -a "$processpath" ]]; then
     
-      echo "$(date) | Removing old installation at /opt/$app"
-      rm -rf "/opt/$app"
-    
+      echo "$(date) | Removing old installation at $processpath"
+      rm -rf "$processpath"
     fi
 
     # Make sure permissions are correct
@@ -999,28 +1000,23 @@ function installHomebrew () {
 
     # Checking if the app was installed successfully
     if [ "$?" = "0" ]; then
-        if [[ -a "/opt/$app/bin/brew" ]]; then
+        if [[ -a "${processpath}bin/brew" ]]; then
+            echo "$(date) | $appname Installed"
 
-            grep -q /opt/homebrew/bin/brew /Users/$user/.zprofile || (echo; echo 'eval "$(/opt/homebrew/bin/brew shellenv)"') >> /Users/$user/.zprofile
+            grep -q ${processpath}bin/brew /Users/$user/.zprofile || (echo; echo 'eval "$('${processpath}'bin/brew shellenv)"') >> /Users/$user/.zprofile
             chown $user /Users/$user/.zprofile
-            cat << 'EOF' > /tmp/brew_install.zsh
-#!/usr/bin/env zsh
-eval "$(/opt/homebrew/bin/brew shellenv)"
-echo "$(date) | Install basic Brew bottles"
-brew install chezmoi op powershell
-brew cleanup --prune=all
-EOF
-            chmod 777 /tmp/brew_install.zsh
+            echo "#!/usr/bin/env zsh" > "/tmp/brew_install.zsh"
+            echo "eval \"\$(${processpath}bin/brew shellenv)\"" >> "/tmp/brew_install.zsh"
+            echo "echo \"\$(date) | Install basic Brew bottles\"" >> "/tmp/brew_install.zsh"
+            echo "brew install $brewInstall" >> "/tmp/brew_install.zsh"
+            echo "brew cleanup --prune=all" >> "/tmp/brew_install.zsh"
+            chmod 777 "/tmp/brew_install.zsh"
             su -l $user -c "/tmp/brew_install.zsh"
 
-            # Cleanup sudoers permissions
-            echo "$(date) | Removing sudo permissions"
-            rm -f /etc/sudoers.d/temp_install-$app /tmp/$tempfile /tmp/brew_install.zsh
-
-            echo "$(date) | $appname Installed"
+            echo "$(date) | $appname Bottles Installed"
             updateOctory installed
             echo "$(date) | Cleaning Up"
-            rm -rf "$tempfile"            
+            rm -rf "$tempfile" "/tmp/$tempfile" "/tmp/brew_install.zsh" "/etc/sudoers.d/temp_install-$app"
 
             # Update metadata
             fetchLastModifiedDate update
@@ -1028,17 +1024,15 @@ EOF
             echo "$(date) | Application [$appname] succesfully installed"
             exit 0
         else
-            # Cleanup sudoers permissions
-            echo "$(date) | Removing sudo permissions"
-            rm -f /etc/sudoers.d/temp_install-$app /tmp/$tempfile /tmp/brew_install.zsh
+            echo "$(date) | Cleaning Up"
+            rm -rf "$tempfile" "/tmp/$tempfile" "/tmp/brew_install.zsh" "/etc/sudoers.d/temp_install-$app"
 
             echo "$(date) | Failed to install $appname"
             exit 1
         fi
     else
-        # Cleanup sudoers permissions
-        echo "$(date) | Removing sudo permissions"
-        rm -f /etc/sudoers.d/temp_install-$app /tmp/$tempfile /tmp/brew_install.zsh
+        echo "$(date) | Cleaning Up"
+        rm -rf "$tempfile" "/tmp/$tempfile" "/tmp/brew_install.zsh" "/etc/sudoers.d/temp_install-$app"
 
         # Something went wrong here, either the download failed or the install Failed
         # intune will pick up the exit status and the IT Pro can use that to determine what went wrong.
@@ -1075,6 +1069,39 @@ function updateOctory () {
             echo "$(date) | Updating Octory monitor for [$appname] to [$1]"
             /usr/local/bin/octo-notifier monitor "$appname" --state $1 >/dev/null
         fi
+    fi
+
+}
+
+function updateSplashScreen () {
+
+    #################################################################################################################
+    #################################################################################################################
+    ##
+    ##  This function is designed to update the Splash Screen status (if required)
+    ##
+    ##
+    ##  Parameters (updateSplashScreen parameter)
+    ##
+    ##      wait
+    ##      success
+    ##      fail
+    ##      error
+    ##      pending
+    ##      progress:xx
+    ##
+    ###############################################################
+    ###############################################################
+
+    # Is Swift Dialog present
+    if [[ -a "/Library/Application Support/Dialog/Dialog.app/Contents/MacOS/Dialog" ]]; then
+
+
+        echo "$(date) | Updating Swift Dialog monitor for [$appname] to [$1]"
+        echo listitem: title: $appname, status: $1, statustext: $2 >> /var/tmp/dialog.log 
+
+        # Supported status: wait, success, fail, error, pending or progress:xx
+
     fi
 
 }
