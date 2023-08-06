@@ -956,8 +956,8 @@ function installBZ2 () {
     fi
 }
 
-## Install Homebrew Function
-function installHomebrew () {
+## Run SHELLSCRIPT Function
+function runSHELLSCRIPT () {
 
     # Check if app is running, if it is we need to wait.
     waitForProcess "$processpath" "300" "$terminateprocess"
@@ -984,17 +984,25 @@ function installHomebrew () {
     fi
 
     # Make sure permissions are correct
-    echo "$(date) | Fix up permissions"
+    echo "$(date) | Fix up permissions and copy $tempfile to /tmp/$tempfile"
     cp -f $tempfile /tmp/$tempfile
     chmod 755 /tmp/$tempfile
 
     for user in $(/usr/bin/users)
     do
-        echo "$(date) | Adding temporal passwordless sudo permissions for user $user"
-        echo "$user ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/temp_install-$app
+        [ "$?" != "0" ] && break
+        groups jp | grep -q -w admin
+        if [ "$?" = "0" ]; then
+            echo "$(date) | Adding temporal passwordless sudo permissions for user $user"
+            echo "$user ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/temp_install-$app
 
-        echo "$(date) | Running install script $tempfile in user context for user $user"
-        su -l $user -c "NONINTERACTIVE=1 /bin/bash /tmp/$tempfile"
+            echo "$(date) | Running install script /tmp/$tempfile in user context for user $user"
+            su -l $user -c "NONINTERACTIVE=1 /bin/bash /tmp/$tempfile"
+        else
+            echo "$(date) | $user does not have local admin permissions, installation denied."
+            return 1
+        fi
+
         break
     done
 
@@ -1168,7 +1176,7 @@ waitForDesktop
 # Download app
 downloadApp
 
-# Install PKG file
+# Run SHELLSCRIPT file
 if [[ $packageType == "SHELLSCRIPT" ]]; then
-    installHomebrew
+    runSHELLSCRIPT
 fi
