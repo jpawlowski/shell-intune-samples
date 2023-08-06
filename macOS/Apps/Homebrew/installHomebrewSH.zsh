@@ -991,7 +991,7 @@ function runSHELLSCRIPT () {
     for user in $(/usr/bin/users)
     do
         [ "$?" != "0" ] && break
-        groups jp | grep -q -w admin
+        groups $user | grep -q -w admin
         if [ "$?" = "0" ]; then
             echo "$(date) | Adding temporal passwordless sudo permissions for user $user"
             echo "$user ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/temp_install-$app

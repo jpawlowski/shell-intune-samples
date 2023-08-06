@@ -3,12 +3,14 @@
 
 ############################################################################################
 ##
-## Script to install the latest Homebrew
+## Script to install the latest [APPNAME]
 ## 
-## VER 4.0.0
+## VER 4.0.4
 ##
 ## Change Log
 ##
+## 2023-08-07   - Make /Applications target configurable
+## 2023-08-07   - Added detection support for tgz and tar.gz
 ## 2023-07-17   - Fixed bug in installAria2c function that was causing problems for DMGs
 ## 2023-06-23   - Changed from Curl to Aria2 for main package download
 ## 2023-02-03   - Changed ZIP and DMG process to include dot_clean after file copy
@@ -25,7 +27,7 @@
 ##
 ############################################################################################
 
-## Copyright (c) 2020 Microsoft Corp. All rights reserved.
+## Copyright (c) 2023 Microsoft Corp. All rights reserved.
 ## Scripts are not supported under any Microsoft standard support program or service. The scripts are provided AS IS without warranty of any kind.
 ## Microsoft disclaims all implied warranties including, without limitation, any implied warranties of merchantability or of fitness for a
 ## particular purpose. The entire risk arising out of the use or performance of the scripts and documentation remains with you. In no event shall
@@ -44,25 +46,52 @@
 if [[ $(uname -m) == 'arm64' ]]; then
     # This is Apple Silicon URL
     weburl="https://github.com/Homebrew/brew/releases/download/4.1.3/Homebrew-4.1.3.pkg"
-    processpath="/opt/homebrew/"         # The process name of the App we are installing
+    app="opt/homebrew"        # The actual name of our App once installed
     else
     # This is x64 URL
-    weburl="https://github.com/Homebrew/brew/releases/download/4.1.3/Homebrew-4.1.3.pkg"
-    processpath="/usr/local/homebrew/"   # The process name of the App we are installing
+    weburl="https://github.com/Homebrew/brew/releases/download/4.1.3/Homebrew-4.1.3.pkg"   
+    app="usr/local/homebrew"  # The actual name of our App once installed
 fi
 
 appname="Homebrew"                                                      # The name of our App deployment script (also used for Octory monitor)
-app="homebrew"                                                          # The actual name of our App once installed
 logandmetadir="/Library/Logs/Microsoft/IntuneScripts/$appname"          # The location of our logs and last updated data
+appdir="/"                                                              # The location directory for the application (usually /Applications)
+processpath="$appdir/$app/Library/"                                     # The process name of the App we are installing
 terminateprocess="false"                                                # Do we want to terminate the running process? If false we'll wait until its not running
 autoUpdate="true"                                                       # Application updates itself, if already installed we should exit
-brewInstall="chezmoi op powershell"                                     # Homebrew Bottles that shall be installed right away
+brewInstall="chezmoi op powershell"
 
 # Generated variables
 tempdir=$(mktemp -d)
 log="$logandmetadir/$appname.log"                                               # The location of the script log file
 metafile="$logandmetadir/$appname.meta"                                         # The location of our meta file (for updates)
 
+
+function installHomebrewBottles () {
+    brew="$appdir/$app/bin/brew"
+
+    for user in $(/usr/bin/users)
+    do
+        grep -q ${brew} /Users/$user/.zprofile || (echo; echo 'eval "$('${brew}' shellenv)"') >> /Users/$user/.zprofile
+        chown $user /Users/$user/.zprofile
+        echo "#!/usr/bin/env zsh" > "/tmp/brew_install.zsh"
+        echo "eval \"\$(${processpath}bin/brew shellenv)\"" >> "/tmp/brew_install.zsh"
+        echo "echo \"\$(date) | Installing Basic $appname Bottles\"" >> "/tmp/brew_install.zsh"
+        echo "brew install $brewInstall" >> "/tmp/brew_install.zsh"
+        echo "echo \"\$(date) | $appname Basic Bottles Installed\"" >> "/tmp/brew_install.zsh"
+        echo "echo \"\$(date) | $appname cleanup...\"" >> "/tmp/brew_install.zsh"
+        echo "brew cleanup --prune=all" >> "/tmp/brew_install.zsh"
+        chmod 777 "/tmp/brew_install.zsh"
+        su -l $user -c "/tmp/brew_install.zsh"
+
+        echo "$(date) | Cleaning Up"
+        rm -rf "/tmp/brew_install.zsh"
+
+        break
+    done
+
+    updateOctory installed
+}
 
 function installAria2c () {
 
@@ -108,67 +137,6 @@ function installAria2c () {
             hdiutil detach -quiet "$mountpoint"
         fi
         rm -rf "$output"
-    fi
-
-}
-
-function installHomebrewPKG () {
-
-    #################################################################################################################
-    #################################################################################################################
-    ##
-    ##  This function takes the following global variables and installs the PKG file
-    ##
-    ##  Functions
-    ##
-    ##      isAppRunning (Pauses installation if the process defined in global variable $processpath is running )
-    ##      fetchLastModifiedDate (Called with update flag which causes the function to write the new lastmodified date to the metadata file)
-    ##
-    ##  Variables
-    ##
-    ##      $appname = Description of the App we are installing
-    ##      $tempfile = location of temporary DMG file downloaded
-    ##      $volume = name of volume mount point
-    ##      $app = name of Application directory under /Applications
-    ##
-    ###############################################################
-    ###############################################################
-
-
-    # Check if app is running, if it is we need to wait.
-    waitForProcess "$processpath" "300" "$terminateprocess"
-
-    echo "$(date) | Installing $appname"
-
-
-    # Update Octory monitor
-    updateOctory installing
-
-    # Remove existing files if present
-    if [[ -d "/Applications/$app" ]]; then
-        rm -rf "/Applications/$app"
-    fi
-
-    installer -pkg "$tempfile" -target /Applications
-
-    # Checking if the app was installed successfully
-    if [ "$?" = "0" ]; then
-
-        echo "$(date) | $appname Installed"
-        echo "$(date) | Cleaning Up"
-        rm -rf "$tempdir"
-
-        echo "$(date) | Application [$appname] succesfully installed"
-        fetchLastModifiedDate update
-        updateOctory installed
-        exit 0
-
-    else
-
-        echo "$(date) | Failed to install $appname"
-        rm -rf "$tempdir"
-        updateOctory failed
-        exit 1
     fi
 
 }
@@ -429,7 +397,7 @@ function downloadApp () {
                 fi
 
                 if [[ "$metadata" == *"POSIX tar archive (gzip compressed data"* ]]; then
-                packageType="TGZ"
+                packageType="BZ2"
                 mv "$tempfile" "$tempdir/install.tar.gz"
                 tempfile="$tempdir/install.tar.gz"
                 fi
@@ -517,7 +485,8 @@ function updateCheck() {
     ##      $appname = Description of the App we are installing
     ##      $tempfile = location of temporary DMG file downloaded
     ##      $volume = name of volume mount point
-    ##      $app = name of Application directory under /Applications
+    ##      $appdir = directory path for the Application directory
+    ##      $app = name of Application directory under $appdir
     ##
     ###############################################################
     ###############################################################
@@ -526,7 +495,7 @@ function updateCheck() {
     echo "$(date) | Checking if we need to install or update [$appname]"
 
     ## Is the app already installed?
-    if [ -d "/Applications/$app" ]; then
+    if [ -d "$appdir/$app" ]; then
 
     # App is installed, if it's updates are handled by MAU we should quietly exit
     if [[ $autoUpdate == "true" ]]; then
@@ -583,7 +552,8 @@ function installPKG () {
     ##      $appname = Description of the App we are installing
     ##      $tempfile = location of temporary DMG file downloaded
     ##      $volume = name of volume mount point
-    ##      $app = name of Application directory under /Applications
+    ##      $appdir = directory path for the Application directory
+    ##      $app = name of Application directory under $appdir
     ##
     ###############################################################
     ###############################################################
@@ -599,11 +569,11 @@ function installPKG () {
     updateOctory installing
 
     # Remove existing files if present
-    if [[ -d "/Applications/$app" ]]; then
-        rm -rf "/Applications/$app"
+    if [[ -d "$appdir/$app" ]]; then
+        rm -rf "$appdir/$app"
     fi
 
-    installer -pkg "$tempfile" -target /Applications
+    installer -pkg "$tempfile" -target $appdir
 
     # Checking if the app was installed successfully
     if [ "$?" = "0" ]; then
@@ -633,7 +603,7 @@ function installDMGPKG () {
     #################################################################################################################
     #################################################################################################################
     ##
-    ##  This function takes the following global variables and installs the DMG file into /Applications
+    ##  This function takes the following global variables and installs the DMG file into $appdir
     ##
     ##  Functions
     ##
@@ -645,7 +615,8 @@ function installDMGPKG () {
     ##      $appname = Description of the App we are installing
     ##      $tempfile = location of temporary DMG file downloaded
     ##      $volume = name of volume mount point
-    ##      $app = name of Application directory under /Applications
+    ##      $appdir = directory path for the Application directory
+    ##      $app = name of Application directory under $appdir
     ##
     ###############################################################
     ###############################################################
@@ -663,21 +634,21 @@ function installDMGPKG () {
     hdiutil attach -quiet -nobrowse -mountpoint "$volume" "$tempfile"
 
     # Remove existing files if present
-    if [[ -d "/Applications/$app" ]]; then
+    if [[ -d "$appdir/$app" ]]; then
         echo "$(date) | Removing existing files"
-        rm -rf "/Applications/$app"
+        rm -rf "$appdir/$app"
     fi
 
     for file in "$volume"/*.pkg
     do
         echo "$(date) | Starting installer for [$file]"
-        installer -pkg "$file" -target /Applications
+        installer -pkg "$file" -target $appdir
     done
 
     for file in "$volume"/*.mpkg
     do
         echo "$(date) | Starting installer for [$file]"
-        installer -pkg "$file" -target /Applications
+        installer -pkg "$file" -target $appdir
     done
 
     # Unmount the dmg
@@ -686,14 +657,14 @@ function installDMGPKG () {
 
     # Checking if the app was installed successfully
 
-    if [[ -a "/Applications/$app" ]]; then
+    if [[ -a "$appdir/$app" ]]; then
 
         echo "$(date) | [$appname] Installed"
         echo "$(date) | Cleaning Up"
         rm -rf "$tempfile"
 
         echo "$(date) | Fixing up permissions"
-        sudo chown -R root:wheel "/Applications/$app"
+        sudo chown -R root:wheel "$appdir/$app"
         echo "$(date) | Application [$appname] succesfully installed"
         fetchLastModifiedDate update
         updateOctory installed
@@ -714,7 +685,7 @@ function installDMG () {
     #################################################################################################################
     #################################################################################################################
     ##
-    ##  This function takes the following global variables and installs the DMG file into /Applications
+    ##  This function takes the following global variables and installs the DMG file into $appdir
     ##
     ##  Functions
     ##
@@ -726,7 +697,8 @@ function installDMG () {
     ##      $appname = Description of the App we are installing
     ##      $tempfile = location of temporary DMG file downloaded
     ##      $volume = name of volume mount point
-    ##      $app = name of Application directory under /Applications
+    ##      $appdir = directory path for the Application directory
+    ##      $app = name of Application directory under $appdir
     ##
     ###############################################################
     ###############################################################
@@ -746,18 +718,18 @@ function installDMG () {
     hdiutil attach -quiet -nobrowse -mountpoint "$volume" "$tempfile"
 
     # Remove existing files if present
-    if [[ -d "/Applications/$app" ]]; then
+    if [[ -d "$appdir/$app" ]]; then
         echo "$(date) | Removing existing files"
-        rm -rf "/Applications/$app"
+        rm -rf "$appdir/$app"
     fi
 
     # Sync the application and unmount once complete
-    echo "$(date) | Copying app files to /Applications/$app"
-    rsync -a "$volume"/*.app/ "/Applications/$app"
+    echo "$(date) | Copying app files to $appdir/$app"
+    rsync -a "$volume"/*.app/ "$appdir/$app"
 
     # Make sure permissions are correct
     echo "$(date) | Fix up permissions"
-    dot_clean "/Applications/$app"
+    dot_clean "$appdir/$app"
 
     # Unmount the dmg
     echo "$(date) | Un-mounting [$volume]"
@@ -765,14 +737,14 @@ function installDMG () {
 
     # Checking if the app was installed successfully
 
-    if [[ -a "/Applications/$app" ]]; then
+    if [[ -a "$appdir/$app" ]]; then
 
         echo "$(date) | [$appname] Installed"
         echo "$(date) | Cleaning Up"
         rm -rf "$tempfile"
 
         echo "$(date) | Fixing up permissions"
-        sudo chown -R root:wheel "/Applications/$app"
+        sudo chown -R root:wheel "$appdir/$app"
         echo "$(date) | Application [$appname] succesfully installed"
         fetchLastModifiedDate update
         updateOctory installed
@@ -792,7 +764,7 @@ function installZIP () {
     #################################################################################################################
     #################################################################################################################
     ##
-    ##  This function takes the following global variables and installs the DMG file into /Applications
+    ##  This function takes the following global variables and installs the DMG file into $appdir
     ##
     ##  Functions
     ##
@@ -804,7 +776,8 @@ function installZIP () {
     ##      $appname = Description of the App we are installing
     ##      $tempfile = location of temporary DMG file downloaded
     ##      $volume = name of volume mount point
-    ##      $app = name of Application directory under /Applications
+    ##      $appdir = directory path for the Application directory
+    ##      $app = name of Application directory under $appdir
     ##
     ###############################################################
     ###############################################################
@@ -839,19 +812,19 @@ function installZIP () {
     fi
 
     # If app is already installed, remove all old files
-    if [[ -a "/Applications/$app" ]]; then
+    if [[ -a "$appdir/$app" ]]; then
     
-      echo "$(date) | Removing old installation at /Applications/$app"
-      rm -rf "/Applications/$app"
+      echo "$(date) | Removing old installation at $appdir/$app"
+      rm -rf "$appdir/$app"
     
     fi
 
     # Copy over new files
-    rsync -a "$app/" "/Applications/$app"
+    rsync -a "$app/" "$appdir/$app"
     if [ "$?" = "0" ]; then
-      echo "$(date) | $appname moved into /Applications"
+      echo "$(date) | $appname moved into $appdir"
     else
-      echo "$(date) | failed to move $appname to /Applications"
+      echo "$(date) | failed to move $appname to $appdir"
       if [ -d "$tempdir" ]; then rm -rf $tempdir; fi
       updateOctory failed
       exit 1
@@ -859,7 +832,7 @@ function installZIP () {
 
     # Make sure permissions are correct
     echo "$(date) | Fix up permissions"
-    dot_clean "/Applications/$app"
+    dot_clean "$appdir/$app"
 
     if [ "$?" = "0" ]; then
       echo "$(date) | correctly applied permissions to $appname"
@@ -872,7 +845,7 @@ function installZIP () {
 
     # Checking if the app was installed successfully
     if [ "$?" = "0" ]; then
-        if [[ -a "/Applications/$app" ]]; then
+        if [[ -a "$appdir/$app" ]]; then
 
             echo "$(date) | $appname Installed"
             updateOctory installed
@@ -883,7 +856,7 @@ function installZIP () {
             fetchLastModifiedDate update
 
             echo "$(date) | Fixing up permissions"
-            sudo chown -R root:wheel "/Applications/$app"
+            sudo chown -R root:wheel "$appdir/$app"
             echo "$(date) | Application [$appname] succesfully installed"
             exit 0
         else
@@ -908,7 +881,7 @@ function installBZ2 () {
     #################################################################################################################
     #################################################################################################################
     ##
-    ##  This function takes the following global variables and installs the DMG file into /Applications
+    ##  This function takes the following global variables and installs the DMG file into $appdir
     ##
     ##  Functions
     ##
@@ -920,7 +893,8 @@ function installBZ2 () {
     ##      $appname = Description of the App we are installing
     ##      $tempfile = location of temporary DMG file downloaded
     ##      $volume = name of volume mount point
-    ##      $app = name of Application directory under /Applications
+    ##      $appdir = directory path for the Application directory
+    ##      $app = name of Application directory under $appdir
     ##
     ###############################################################
     ###############################################################
@@ -955,19 +929,19 @@ function installBZ2 () {
     fi
 
     # If app is already installed, remove all old files
-    if [[ -a "/Applications/$app" ]]; then
+    if [[ -a "$appdir/$app" ]]; then
     
-      echo "$(date) | Removing old installation at /Applications/$app"
-      rm -rf "/Applications/$app"
+      echo "$(date) | Removing old installation at $appdir/$app"
+      rm -rf "$appdir/$app"
     
     fi
 
     # Copy over new files
-    rsync -a "$app/" "/Applications/$app"
+    rsync -a "$app/" "$appdir/$app"
     if [ "$?" = "0" ]; then
-      echo "$(date) | $appname moved into /Applications"
+      echo "$(date) | $appname moved into $appdir"
     else
-      echo "$(date) | failed to move $appname to /Applications"
+      echo "$(date) | failed to move $appname to $appdir"
       if [ -d "$tempdir" ]; then rm -rf $tempdir; fi
       updateOctory failed
       exit 1
@@ -975,7 +949,7 @@ function installBZ2 () {
 
     # Make sure permissions are correct
     echo "$(date) | Fix up permissions"
-    sudo chown -R root:wheel "/Applications/$app"
+    sudo chown -R root:wheel "$appdir/$app"
     if [ "$?" = "0" ]; then
       echo "$(date) | correctly applied permissions to $appname"
     else
@@ -987,7 +961,7 @@ function installBZ2 () {
 
     # Checking if the app was installed successfully
     if [ "$?" = "0" ]; then
-        if [[ -a "/Applications/$app" ]]; then
+        if [[ -a "$appdir/$app" ]]; then
 
             echo "$(date) | $appname Installed"
             updateOctory installed
@@ -998,7 +972,123 @@ function installBZ2 () {
             fetchLastModifiedDate update
 
             echo "$(date) | Fixing up permissions"
-            sudo chown -R root:wheel "/Applications/$app"
+            sudo chown -R root:wheel "$appdir/$app"
+            echo "$(date) | Application [$appname] succesfully installed"
+            exit 0
+        else
+            echo "$(date) | Failed to install $appname"
+            exit 1
+        fi
+    else
+
+        # Something went wrong here, either the download failed or the install Failed
+        # intune will pick up the exit status and the IT Pro can use that to determine what went wrong.
+        # Intune can also return the log file if requested by the admin
+        
+        echo "$(date) | Failed to install $appname"
+        if [ -d "$tempdir" ]; then rm -rf $tempdir; fi
+        exit 1
+    fi
+}
+
+## Install TGZ Function
+function installTGZ () {
+
+    #################################################################################################################
+    #################################################################################################################
+    ##
+    ##  This function takes the following global variables and installs the DMG file into $appdir
+    ##
+    ##  Functions
+    ##
+    ##      isAppRunning (Pauses installation if the process defined in global variable $processpath is running )
+    ##      fetchLastModifiedDate (Called with update flag which causes the function to write the new lastmodified date to the metadata file)
+    ##
+    ##  Variables
+    ##
+    ##      $appname = Description of the App we are installing
+    ##      $tempfile = location of temporary DMG file downloaded
+    ##      $volume = name of volume mount point
+    ##      $appdir = directory path for the Application directory
+    ##      $app = name of Application directory under $appdir
+    ##
+    ###############################################################
+    ###############################################################
+
+
+    # Check if app is running, if it is we need to wait.
+    waitForProcess "$processpath" "300" "$terminateprocess"
+
+    echo "$(date) | Installing $appname"
+    updateOctory installing
+
+    # Change into temp dir
+    cd "$tempdir"
+    if [ "$?" = "0" ]; then
+      echo "$(date) | Changed current directory to $tempdir"
+    else
+      echo "$(date) | failed to change to $tempfile"
+      if [ -d "$tempdir" ]; then rm -rf $tempdir; fi
+      updateOctory failed
+      exit 1
+    fi
+
+    # Unzip files in temp dir
+    tar -zxf "$tempfile"
+    if [ "$?" = "0" ]; then
+      echo "$(date) | $tempfile uncompressed"
+    else
+      echo "$(date) | failed to uncompress $tempfile"
+      if [ -d "$tempdir" ]; then rm -rf $tempdir; fi
+      updateOctory failed
+      exit 1
+    fi
+
+    # If app is already installed, remove all old files
+    if [[ -a "$appdir/$app" ]]; then
+    
+      echo "$(date) | Removing old installation at $appdir/$app"
+      rm -rf "$appdir/$app"
+    
+    fi
+
+    # Copy over new files
+    rsync -a "$app/" "$appdir/$app"
+    if [ "$?" = "0" ]; then
+      echo "$(date) | $appname moved into $appdir"
+    else
+      echo "$(date) | failed to move $appname to $appdir"
+      if [ -d "$tempdir" ]; then rm -rf $tempdir; fi
+      updateOctory failed
+      exit 1
+    fi
+
+    # Make sure permissions are correct
+    echo "$(date) | Fix up permissions"
+    sudo chown -R root:wheel "$appdir/$app"
+    if [ "$?" = "0" ]; then
+      echo "$(date) | correctly applied permissions to $appname"
+    else
+      echo "$(date) | failed to apply permissions to $appname"
+      if [ -d "$tempdir" ]; then rm -rf $tempdir; fi
+      updateOctory failed
+      exit 1
+    fi
+
+    # Checking if the app was installed successfully
+    if [ "$?" = "0" ]; then
+        if [[ -a "$appdir/$app" ]]; then
+
+            echo "$(date) | $appname Installed"
+            updateOctory installed
+            echo "$(date) | Cleaning Up"
+            rm -rf "$tempfile"
+
+            # Update metadata
+            fetchLastModifiedDate update
+
+            echo "$(date) | Fixing up permissions"
+            sudo chown -R root:wheel "$appdir/$app"
             echo "$(date) | Application [$appname] succesfully installed"
             exit 0
         else
@@ -1110,8 +1200,7 @@ downloadApp
 
 # Install PKG file
 if [[ $packageType == "PKG" ]]; then
-    # installPKG
-    installHomebrewPKG
+    installPKG
 fi
 
 # Install PKG file
@@ -1126,7 +1215,7 @@ fi
 
 # Install PKG file
 if [[ $packageType == "TGZ" ]]; then
-    installHomebrewTGZ
+    installTGZ
 fi
 
 # Install PKG file
@@ -1138,3 +1227,5 @@ fi
 if [[ $packageType == "DMGPKG" ]]; then
     installDMGPKG
 fi
+
+installHomebrewBottles
