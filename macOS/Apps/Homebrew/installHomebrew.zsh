@@ -59,7 +59,7 @@ appdir="/"                                                              # The lo
 processpath="$appdir/$app/Library/"                                     # The process name of the App we are installing
 terminateprocess="false"                                                # Do we want to terminate the running process? If false we'll wait until its not running
 autoUpdate="true"                                                       # Application updates itself, if already installed we should exit
-brewInstall="chezmoi op powershell"
+brewInstall="chezmoi 1password-cli powershell"
 
 # Generated variables
 tempdir=$(mktemp -d)
@@ -581,6 +581,8 @@ function installPKG () {
         echo "$(date) | $appname Installed"
         echo "$(date) | Cleaning Up"
         rm -rf "$tempdir"
+
+        installHomebrewBottles
 
         echo "$(date) | Application [$appname] succesfully installed"
         fetchLastModifiedDate update
@@ -1227,5 +1229,3 @@ fi
 if [[ $packageType == "DMGPKG" ]]; then
     installDMGPKG
 fi
-
-installHomebrewBottles
