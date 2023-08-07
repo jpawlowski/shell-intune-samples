@@ -56,10 +56,10 @@ fi
 appname="Homebrew"                                                      # The name of our App deployment script (also used for Octory monitor)
 logandmetadir="/Library/Logs/Microsoft/IntuneScripts/install$appname"   # The location of our logs and last updated data
 appdir="/"                                                              # The location directory for the application (usually /Applications)
-processpath="$appdir/$app/Library/"                                     # The process name of the App we are installing
+processpath="${appdir}$app/Library/"                                    # The process name of the App we are installing
 terminateprocess="false"                                                # Do we want to terminate the running process? If false we'll wait until its not running
 autoUpdate="true"                                                       # Application updates itself, if already installed we should exit
-brewInstall="chezmoi 1password-cli powershell"
+brewInstall="chezmoi powershell"                                        # Some basic Brew Bottles (must not use sudo to install)
 
 # Generated variables
 tempdir=$(mktemp -d)
@@ -75,7 +75,7 @@ function installHomebrewBottles () {
         grep -q ${brew} /Users/$user/.zprofile || (echo; echo 'eval "$('${brew}' shellenv)"') >> /Users/$user/.zprofile
         chown $user /Users/$user/.zprofile
         echo "#!/usr/bin/env zsh" > "/tmp/brew_install.zsh"
-        echo "eval \"\$(${processpath}bin/brew shellenv)\"" >> "/tmp/brew_install.zsh"
+        echo "eval \"\$(${appdir}$app/bin/brew shellenv)\"" >> "/tmp/brew_install.zsh"
         echo "echo \"\$(date) | Installing Basic $appname Bottles\"" >> "/tmp/brew_install.zsh"
         echo "brew install $brewInstall" >> "/tmp/brew_install.zsh"
         echo "echo \"\$(date) | $appname Basic Bottles Installed\"" >> "/tmp/brew_install.zsh"
