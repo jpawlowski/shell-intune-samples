@@ -77,7 +77,7 @@ function installHomebrewBottles () {
         echo "#!/usr/bin/env zsh" > "/tmp/brew_install.zsh"
         echo "eval \"\$(${appdir}$app/bin/brew shellenv)\"" >> "/tmp/brew_install.zsh"
         echo "echo \"\$(date) | Installing Basic $appname Bottles\"" >> "/tmp/brew_install.zsh"
-        echo "brew install $brewInstall" >> "/tmp/brew_install.zsh"
+        echo "brew install --quiet --force-bottle $brewInstall" >> "/tmp/brew_install.zsh"
         echo "echo \"\$(date) | $appname Basic Bottles Installed\"" >> "/tmp/brew_install.zsh"
         echo "echo \"\$(date) | $appname cleanup...\"" >> "/tmp/brew_install.zsh"
         echo "brew cleanup --prune=all" >> "/tmp/brew_install.zsh"
