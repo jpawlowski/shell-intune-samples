@@ -45,11 +45,11 @@
 # Pick correct URL for the CPU architecture
 if [[ $(uname -m) == 'arm64' ]]; then
     # This is Apple Silicon URL
-    weburl="https://github.com/Homebrew/brew/releases/download/4.1.3/Homebrew-4.1.3.pkg"
+    weburl="https://github.com/Homebrew/brew/releases/download/4.1.4/Homebrew-4.1.4.pkg"
     app="opt/homebrew"        # The actual name of our App once installed
     else
     # This is x64 URL
-    weburl="https://github.com/Homebrew/brew/releases/download/4.1.3/Homebrew-4.1.3.pkg"   
+    weburl="https://github.com/Homebrew/brew/releases/download/4.1.4/Homebrew-4.1.4.pkg"   
     app="usr/local/homebrew"  # The actual name of our App once installed
 fi
 
