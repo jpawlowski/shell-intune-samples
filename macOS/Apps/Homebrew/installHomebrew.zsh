@@ -68,7 +68,6 @@ metafile="$logandmetadir/$appname.meta"                                         
 
 
 function installHomebrewBottles () {
-    brew="$appdir/$app/bin/brew"
 
     for user in $(/usr/bin/users)
     do
